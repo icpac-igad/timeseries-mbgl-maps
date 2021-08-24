@@ -16,7 +16,11 @@ This program generates a series of static maps from a pre-configured sequence of
 
 # Installation
 
-TODO
+With [go](https://golang.org/doc/install) installed, run the command below to execute:
+
+```go
+go run main.go
+```
 
 # Usage
 
