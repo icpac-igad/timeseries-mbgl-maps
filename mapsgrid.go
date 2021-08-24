@@ -16,22 +16,56 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-type Payload interface{}
+type GlStyleSource struct {
+	Type_       string                 `json:"type"`
+	Tiles       []string               `json:"tiles,omitempty"`
+	Data        map[string]interface{} `json:"data,omitempty"`
+	TileSize    int                    `json:"tileSize,omitempty"`
+	Maxzoom     int                    `json:"maxzoom,omitempty"`
+	Minzoom     int                    `json:"minzoom,omitempty"`
+	Url         string                 `json:"url,omitempty"`
+	Attribution string                 `json:"attribution,omitempty"`
+}
+
+type GlStyle struct {
+	Version int                      `json:"version"`
+	Sprite  string                   `json:"sprite,omitempty"`
+	Sources map[string]GlStyleSource `json:"sources"`
+	Layers  []interface{}            `json:"layers"`
+}
+
+type Param struct {
+	Key     string `json:"key"`
+	Options []struct {
+		Label string `json:"label,omitempty"`
+		Value string `json:"value,omitempty"`
+	} `json:"options,omitempty"`
+}
+
+type ParamsConfig struct {
+	XParam Param `json:"x_param,omitempty"`
+	YParam Param `json:"y_param,omitempty"`
+}
+
+type WidthHeightConfig struct {
+	Width  int `json:"width,omitempty"`
+	Height int `json:"height,omitempty"`
+}
+
+type Payload struct {
+	Width   int       `json:"width,omitempty"`
+	Height  int       `json:"height,omitempty"`
+	Padding int       `json:"padding,omitempty"`
+	Center  []float64 `json:"center"`
+	Zoom    int       `json:"zoom"`
+	Bounds  []float32 `json:"bounds,omitempty"`
+	Style   GlStyle   `json:"style"`
+}
 
 type MbglResponse struct {
 	c   int
 	r   int
 	img image.Image
-}
-
-type Month struct {
-	name  string
-	value string
-}
-
-type MonthDekad struct {
-	month Month
-	dekad string
 }
 
 type GridConfig struct {
@@ -45,23 +79,7 @@ type GridConfig struct {
 	MbglUrl         string `mapstructure:"MbglUrl"`
 }
 
-var months []Month = []Month{
-	{name: "Jan", value: "01"},
-	{name: "Feb", value: "02"},
-	{name: "Mar", value: "03"},
-	{name: "Apr", value: "04"},
-	{name: "May", value: "05"},
-	{name: "Jun", value: "06"},
-	{name: "Jul", value: "07"},
-	{name: "Aug", value: "08"},
-	{name: "Sep", value: "09"},
-	{name: "Oct", value: "10"},
-	{name: "Nov", value: "11"},
-	{name: "Dec", value: "12"},
-}
-
-func generateMapsGrid(r *http.Request) (*gg.Context, error) {
-
+func generateMapsGrid(w http.ResponseWriter, r *http.Request) (*gg.Context, error) {
 	var dc *gg.Context
 
 	reqBody, err := ioutil.ReadAll(r.Body)
@@ -78,53 +96,71 @@ func generateMapsGrid(r *http.Request) (*gg.Context, error) {
 		return dc, err
 	}
 
-	years := []string{"2019", "2020", "2021"}
-	// years := []string{"1998", "1999", "2000", "2001", "2002", "2003", "2004", "2005", "2006", "2007", "2008", "2009", "2010", "2011", "2012", "2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021"}
+	var widthHeightConfig WidthHeightConfig
+	json.Unmarshal([]byte(reqBody), &widthHeightConfig)
 
-	dekads := []string{"01"}
-
-	yearDekads := []MonthDekad{}
-
-	for _, m := range months {
-		for _, d := range dekads {
-			yearDekads = append(yearDekads, MonthDekad{month: m, dekad: d})
-		}
-
+	if widthHeightConfig.Width != 0 {
+		gridConfig.ImageWidth = widthHeightConfig.Width
 	}
 
-	matrix := make([][]interface{}, len(years))
+	if widthHeightConfig.Width != 0 {
+		gridConfig.ImageHeight = widthHeightConfig.Width
+	}
 
-	for i, year := range years {
-		year_data := make([]interface{}, len(months)*len(dekads))
+	var paramsConfig ParamsConfig
+	json.Unmarshal([]byte(reqBody), &paramsConfig)
 
-		for k, dekad := range yearDekads {
+	err = checkConfig(paramsConfig)
+
+	if err != nil {
+		return dc, err
+	}
+
+	var xValues = paramsConfig.XParam.Options
+	var yValues = paramsConfig.YParam.Options
+
+	var xValuesLen = len(xValues)
+	var yValuesLen = len(yValues)
+
+	matrix := make([][]Payload, yValuesLen)
+
+	for i, yValue := range yValues {
+
+		var yData = make([]Payload, xValuesLen)
+
+		for k, xValue := range xValues {
 
 			var tStyle Payload
+
 			json.Unmarshal([]byte(reqBody), &tStyle)
 
-			layerTiles := tStyle.(map[string]interface{})["style"].(map[string]interface{})["sources"].(map[string]interface{})["parameter_layer"].(map[string]interface{})["tiles"]
+			if source, found := tStyle.Style.Sources["parameter_layer"]; found {
 
-			tiles, _ := layerTiles.([]interface{})
+				tile := source.Tiles[0]
 
-			tileStr := fmt.Sprintf("%v", tiles[0])
+				tileStr := fmt.Sprintf("%v", tile)
 
-			// replace template with real data
-			tileStr = strings.Replace(tileStr, "{SELECTED_YEAR}", year, -1)
-			tileStr = strings.Replace(tileStr, "{SELECTED_MONTH}", dekad.month.value, -1)
-			tileStr = strings.Replace(tileStr, "{SELECTED_TENDAYS}", dekad.dekad, -1)
+				// replace template with real data
+				tileStr = strings.Replace(tileStr, fmt.Sprintf("{%s}", paramsConfig.YParam.Key), yValue.Value, -1)
+				tileStr = strings.Replace(tileStr, fmt.Sprintf("{%s}", paramsConfig.XParam.Key), xValue.Value, -1)
 
-			tiles[0] = tileStr
+				tiles := []string{tileStr}
 
-			tStyle.(map[string]interface{})["style"].(map[string]interface{})["sources"].(map[string]interface{})["parameter_layer"].(map[string]interface{})["tiles"] = tiles
+				source.Tiles = tiles
 
-			year_data[k] = tStyle
+				tStyle.Style.Sources["parameter_layer"] = source
+
+				yData[k] = tStyle
+
+			}
+
 		}
 
-		matrix[i] = year_data
+		matrix[i] = yData
 	}
 
-	width := len(yearDekads)*(gridConfig.ImageWidth+(gridConfig.ImagePadding*2)) + gridConfig.LeftLabelsWidth + gridConfig.RightPadding
-	height := (len(years) * (gridConfig.ImageHeight + (gridConfig.ImagePadding * 2))) + (gridConfig.TextHeight * 2)
+	width := xValuesLen*(gridConfig.ImageWidth+(gridConfig.ImagePadding*2)) + gridConfig.LeftLabelsWidth + gridConfig.RightPadding
+	height := (yValuesLen * (gridConfig.ImageHeight + (gridConfig.ImagePadding * 2))) + (gridConfig.TextHeight * 2)
 
 	// new empty image
 	dc = gg.NewContext(width, height)
@@ -157,11 +193,11 @@ func generateMapsGrid(r *http.Request) (*gg.Context, error) {
 	dc.SetColor(color.Black)
 
 	// generate top labels
-	for i, d := range yearDekads {
+	for i, xVal := range xValues {
 		x := float64((i * (gridConfig.ImageWidth + (gridConfig.ImagePadding * 2))) + gridConfig.ImagePadding + gridConfig.ImageWidth)
 		y := float64(gridConfig.ImagePadding)
 
-		text := fmt.Sprintf("%s %s", d.month.name, d.dekad)
+		text := xVal.Label
 
 		mTextWidth, mTextHeight := dc.MeasureString(text)
 
@@ -172,16 +208,16 @@ func generateMapsGrid(r *http.Request) (*gg.Context, error) {
 	}
 
 	// generate left labels
-	for j, year := range years {
+	for j, yVal := range yValues {
 		x := float64(gridConfig.ImagePadding)
-		y := float64(j*(gridConfig.ImageHeight+(gridConfig.ImagePadding*2)) + gridConfig.ImagePadding + gridConfig.ImageHeight)
+		y := float64(j*(gridConfig.ImageHeight+(gridConfig.ImagePadding*2)) + gridConfig.ImagePadding + gridConfig.TextHeight)
 
-		yTextWidth, yTextHeight := dc.MeasureString(year)
+		yTextWidth, yTextHeight := dc.MeasureString(yVal.Label)
 
 		x = x + (float64(gridConfig.LeftLabelsWidth)-yTextWidth)/2
 		y = y + (float64(gridConfig.ImageHeight)-yTextHeight)/2
 
-		dc.DrawString(year, x, y)
+		dc.DrawString(yVal.Label, x, y)
 	}
 
 	err = getAllStyleImages(matrix, &gridConfig, dc)
@@ -193,7 +229,7 @@ func generateMapsGrid(r *http.Request) (*gg.Context, error) {
 	return dc, nil
 }
 
-func getAllStyleImages(stylesConfigMatrix [][]interface{}, gridConfig *GridConfig, dc *gg.Context) error {
+func getAllStyleImages(stylesConfigMatrix [][]Payload, gridConfig *GridConfig, dc *gg.Context) error {
 	eg, ctx := errgroup.WithContext(context.Background())
 	results := make(chan MbglResponse)
 

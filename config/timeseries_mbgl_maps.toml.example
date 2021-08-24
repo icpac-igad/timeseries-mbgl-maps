@@ -22,12 +22,17 @@ LeftLabelsWidth = 70
 RightPadding = 20
 ImagePadding = 1
 
+# Cancel a maps request if a map can't be rendered in this time (seconds)
+Timeout = 30
 
 # Enable Prometheus metrics
 # Metrics will be exported at `/metrics`.
 EnableMetrics = true
 
-
 # Allow any page to consume these tiles (default)
 # To specify domain(s) that should be CORS-allowed, express them as ["https://mydomain.com", "https://anotherdomain.org"]
 CORSOrigins = ["*"]
+
+
+# Output extra logging information?
+# Debug = false

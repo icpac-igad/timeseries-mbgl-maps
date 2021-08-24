@@ -14,8 +14,6 @@ import (
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 
-	// Graphics rendering
-
 	// Logging
 	log "github.com/sirupsen/logrus"
 
@@ -31,12 +29,14 @@ import (
 const programName string = "timeseries_mbgl_maps"
 
 // programVersion is the version string we use
-//const programVersion string = "0.1"
-var programVersion string
+const programVersion string = "0.1"
+
+// var programVersion string
 
 func init() {
 	viper.SetDefault("HttpHost", "0.0.0.0")
 	viper.SetDefault("HttpPort", 5800)
+	viper.SetDefault("MbglUrl", "https://eahazardswatch.icpac.net/mbgl-renderer/render")
 	viper.SetDefault("BasePath", "/")
 	viper.SetDefault("fontFilePath", "./fonts/OpenSans-Bold.ttf")
 	viper.SetDefault("ImageWidth", 100)
@@ -47,7 +47,8 @@ func init() {
 	viper.SetDefault("ImagePadding", 1)
 	viper.SetDefault("EnableMetrics", false) // Prometheus metrics
 	viper.SetDefault("CORSOrigins", []string{"*"})
-	viper.SetDefault("Timeout", 10)
+	viper.SetDefault("Timeout", 30)
+	viper.SetDefault("Debug", false)
 }
 
 func main() {
@@ -129,21 +130,15 @@ func requestRenderMapsGrid(w http.ResponseWriter, r *http.Request) error {
 		"event": "request",
 		"topic": "rendermapsgrid",
 	}).Trace("requestRenderMapsGrid")
-	switch r.Method {
-	case "POST":
-		dc, err := generateMapsGrid(r)
-		if err != nil {
-			return err
-		}
 
-		w.WriteHeader(http.StatusOK)
-		w.Header().Set("Content-Type", "image/png")
-		dc.EncodePNG(w)
-
-	default:
-		w.WriteHeader(http.StatusNotImplemented)
-		w.Write([]byte(http.StatusText(http.StatusNotImplemented)))
+	dc, err := generateMapsGrid(w, r)
+	if err != nil {
+		return err
 	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "image/png")
+	dc.EncodePNG(w)
 
 	return nil
 }
@@ -165,7 +160,7 @@ func (tsae tsAppError) Error() string {
 	if tsae.Message != "" {
 		return fmt.Sprintf("%s\n%s", tsae.Message, tsae.SrcErr.Error())
 	}
-	return fmt.Sprintf("%s", tsae.SrcErr.Error())
+	return tsae.SrcErr.Error()
 }
 
 // tsMapsHandler is a function handler that can replace the
@@ -182,6 +177,7 @@ func (fn tsMapsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"method": r.Method,
 		"url":    r.URL,
 	}).Infof("%s %s", r.Method, r.URL)
+
 	if err := fn(w, r); err != nil {
 		if hdr, ok := r.Header["x-correlation-id"]; ok {
 			log.WithField("correlation-id", hdr[0])

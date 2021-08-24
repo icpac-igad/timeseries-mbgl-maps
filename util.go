@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net/url"
 	"strings"
 
@@ -23,4 +24,22 @@ func formatBaseURL(baseHost string, basePath string) string {
 		log.Fatal(err)
 	}
 	return strings.TrimRight(urlHost.ResolveReference(urlPath).String(), "/")
+}
+
+func checkConfig(config ParamsConfig) error {
+	if len(config.XParam.Options) == 0 || len(config.YParam.Options) == 0 {
+		return tsAppError{
+			HTTPCode: 400,
+			SrcErr:   errors.New("options must have a list values"),
+		}
+	}
+
+	if config.XParam.Key == "" || config.YParam.Key == "" {
+		return tsAppError{
+			HTTPCode: 400,
+			SrcErr:   errors.New("x param or y param must have a key"),
+		}
+	}
+
+	return nil
 }
