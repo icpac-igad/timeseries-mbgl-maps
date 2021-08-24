@@ -1,0 +1,33 @@
+# Accept connections on this subnet (default accepts on all)
+HttpHost = "0.0.0.0"
+
+# Accept connections on this port
+HttpPort = 5800
+
+# Optional path to add to the service base URL
+# If set, all routes will be prefixed with this path
+BasePath = "/"
+
+# Url for mbgl renderer. Make sure it accepts POST requests
+MbglUrl = "https://eahazardswatch.icpac.net/mbgl-renderer/render"
+
+# Font File path
+FontFilePath = "./fonts/OpenSans-Bold.ttf"
+
+# Image grid settings
+ImageWidth = 100
+ImageHeight = 100
+TextHeight = 40
+LeftLabelsWidth = 70
+RightPadding = 20
+ImagePadding = 1
+
+
+# Enable Prometheus metrics
+# Metrics will be exported at `/metrics`.
+EnableMetrics = true
+
+
+# Allow any page to consume these tiles (default)
+# To specify domain(s) that should be CORS-allowed, express them as ["https://mydomain.com", "https://anotherdomain.org"]
+CORSOrigins = ["*"]
