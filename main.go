@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	_ "image/png"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"time"
 
@@ -136,9 +138,13 @@ func requestRenderMapsGrid(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 
-	w.WriteHeader(http.StatusOK)
+	buffer := new(bytes.Buffer)
+
+	dc.EncodePNG(buffer)
+
 	w.Header().Set("Content-Type", "image/png")
-	dc.EncodePNG(w)
+	w.Header().Set("Content-Length", strconv.Itoa(len(buffer.Bytes())))
+	w.Write(buffer.Bytes())
 
 	return nil
 }
