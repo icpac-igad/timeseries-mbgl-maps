@@ -2,257 +2,277 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
+	"context"
 	"fmt"
-	"image"
-	"image/color"
 	_ "image/png"
-	"io/ioutil"
-	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"strconv"
 	"strings"
-	"sync"
+	"time"
 
-	"github.com/fogleman/gg"
+	// REST routing
+	"github.com/gorilla/handlers"
+	"github.com/gorilla/mux"
+
+	// Logging
+	log "github.com/sirupsen/logrus"
+
+	//Configuration
+	"github.com/pborman/getopt/v2"
+	"github.com/spf13/viper"
+
+	// Prometheus metrics
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-const mbglUrl = "https://eahazardswatch.icpac.net/mbgl-renderer/render"
-
-var fontfile = "./fonts/OpenSans-Bold.ttf"
-
-type Payload interface{}
-
-type MbglResponse struct {
-	c   int
-	r   int
-	img image.Image
-}
-
-type Month struct {
-	name  string
-	value string
-}
-
-type MonthDekad struct {
-	month Month
-	dekad string
-}
-
-func getImageFromStyle(payload Payload, c int, r int, wg *sync.WaitGroup) {
-
-	defer wg.Done()
-
-	// marshal to use in post data
-	mbglPayload, err := json.Marshal(payload)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// send post request
-	resp, err := http.Post(mbglUrl, "application/json", bytes.NewBuffer(mbglPayload))
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	defer resp.Body.Close()
-
-	// decode image from response body
-	m, _, err := image.Decode(resp.Body)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	result := MbglResponse{c: c, r: r, img: m}
-
-	x := result.c*(image_width+(padding*2)) + padding + left_labels_width
-	y := result.r*(image_height+(padding*2)) + padding + text_height
-	dc.DrawImage(result.img, x, y)
-
-}
-
-var image_width int = 100
-var image_height int = 100
-
-var text_height int = 40
-
-var left_labels_width = 70
-var right_padding = 20
-
-var padding int = 1
-
-var dc *gg.Context
-
-var months []Month = []Month{
-	{name: "Jan", value: "01"},
-	{name: "Feb", value: "02"},
-	{name: "Mar", value: "03"},
-	{name: "Apr", value: "04"},
-	{name: "May", value: "05"},
-	{name: "Jun", value: "06"},
-	{name: "Jul", value: "07"},
-	{name: "Aug", value: "08"},
-	{name: "Sep", value: "09"},
-	{name: "Oct", value: "10"},
-	{name: "Nov", value: "11"},
-	{name: "Dec", value: "12"},
-}
-
-func generateMaps(w http.ResponseWriter, r *http.Request) {
-
-	reqBody, err := ioutil.ReadAll(r.Body)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	years := []string{"2019", "2020", "2021"}
-	// years := []string{"1998", "1999", "2000", "2001", "2002", "2003", "2004", "2005", "2006", "2007", "2008", "2009", "2010", "2011", "2012", "2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021"}
-
-	dekads := []string{"01"}
-
-	yearDekads := []MonthDekad{}
-
-	for _, m := range months {
-		for _, d := range dekads {
-			yearDekads = append(yearDekads, MonthDekad{month: m, dekad: d})
-		}
-
-	}
-
-	matrix := make([][]interface{}, len(years))
-
-	for i, year := range years {
-		year_data := make([]interface{}, len(months)*len(dekads))
-
-		for k, dekad := range yearDekads {
-
-			var tStyle Payload
-			json.Unmarshal([]byte(reqBody), &tStyle)
-
-			layerTiles := tStyle.(map[string]interface{})["style"].(map[string]interface{})["sources"].(map[string]interface{})["parameter_layer"].(map[string]interface{})["tiles"]
-
-			tiles, _ := layerTiles.([]interface{})
-
-			tileStr := fmt.Sprintf("%v", tiles[0])
-
-			// replace template with real data
-			tileStr = strings.Replace(tileStr, "{SELECTED_YEAR}", year, -1)
-			tileStr = strings.Replace(tileStr, "{SELECTED_MONTH}", dekad.month.value, -1)
-			tileStr = strings.Replace(tileStr, "{SELECTED_TENDAYS}", dekad.dekad, -1)
-
-			tiles[0] = tileStr
-
-			tStyle.(map[string]interface{})["style"].(map[string]interface{})["sources"].(map[string]interface{})["parameter_layer"].(map[string]interface{})["tiles"] = tiles
-
-			year_data[k] = tStyle
-		}
-
-		matrix[i] = year_data
-	}
-
-	width := len(yearDekads)*(image_width+(padding*2)) + left_labels_width + right_padding
-	height := (len(years) * (image_height + (padding * 2))) + (text_height * 2)
-
-	// new empty image
-	dc = gg.NewContext(width, height)
-	dc.DrawRectangle(0, 0, float64(width), float64(height))
-
-	// fill rectangle with white bg
-	dc.SetColor(color.RGBA{255, 255, 255, 255})
-	dc.Fill()
-
-	// calculate the width for the inner rectangle. Take image width and subtract added sections and add paddings
-	rec_width := (width - left_labels_width - right_padding) + padding*2
-
-	dc.DrawRectangle(float64(left_labels_width-padding), float64(text_height-padding), float64(rec_width), float64((height-(text_height*2))+padding*2))
-	dc.SetColor(color.RGBA{0, 0, 0, 100})
-	dc.Fill()
-
-	// Load font
-	errr := dc.LoadFontFace(fontfile, 14)
-
-	if errr != nil {
-		log.Fatal(errr)
-	}
-
-	// set font color
-	dc.SetColor(color.Black)
-
-	// generate top labels
-	for i, d := range yearDekads {
-		x := float64((i * (image_width + (padding * 2))) + padding + image_width)
-		y := float64(padding)
-
-		text := fmt.Sprintf("%s %s", d.month.name, d.dekad)
-
-		mTextWidth, mTextHeight := dc.MeasureString(text)
-
-		x = x + (float64(image_width)-mTextWidth)/2
-		y = y + (float64(text_height)-mTextHeight)/2
-
-		dc.DrawStringAnchored(text, x, y, 0.5, 0.5)
-	}
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// generate left labels
-	for j, year := range years {
-		x := float64(padding)
-		y := float64(j*(image_height+(padding*2)) + padding + text_height)
-
-		yTextWidth, yTextHeight := dc.MeasureString(year)
-
-		x = x + (float64(left_labels_width)-yTextWidth)/2
-		y = y + (float64(image_height)-yTextHeight)/2
-
-		dc.DrawString(year, x, y)
-	}
-
-	var wg sync.WaitGroup
-
-	for r, row := range matrix {
-		for c, val := range row {
-			wg.Add(1)
-			go getImageFromStyle(val, c, r, &wg)
-		}
-	}
-
-	wg.Wait()
-
-	w.WriteHeader(http.StatusOK)
-	w.Header().Set("Content-Type", "image/png")
-	dc.EncodePNG(w)
-}
-
-func handleGenerate(w http.ResponseWriter, r *http.Request) {
-
-	switch r.Method {
-	case "POST":
-
-		generateMaps(w, r)
-
-	default:
-		w.WriteHeader(http.StatusNotImplemented)
-		w.Write([]byte(http.StatusText(http.StatusNotImplemented)))
-	}
-
+// programName is the name string we use
+const programName string = "timeseries_mbgl_maps"
+
+// programVersion is the version string we use
+const programVersion string = "0.1"
+
+// var programVersion string
+
+func init() {
+	viper.SetDefault("HttpHost", "0.0.0.0")
+	viper.SetDefault("HttpPort", 5800)
+	viper.SetDefault("MbglUrl", "https://eahazardswatch.icpac.net/mbgl-renderer/render")
+	viper.SetDefault("BasePath", "/")
+	viper.SetDefault("fontFilePath", "./fonts/OpenSans-Bold.ttf")
+	viper.SetDefault("ImageWidth", 100)
+	viper.SetDefault("ImageHeight", 100)
+	viper.SetDefault("TextHeight", 40)
+	viper.SetDefault("LeftLabelsWidth", 70)
+	viper.SetDefault("RightPadding", 20)
+	viper.SetDefault("ImagePadding", 1)
+	viper.SetDefault("EnableMetrics", false) // Prometheus metrics
+	viper.SetDefault("CORSOrigins", []string{"*"})
+	viper.SetDefault("Timeout", 30)
+	viper.SetDefault("Debug", false)
 }
 
 func main() {
 
-	// start := time.Now()
+	// Read the commandline
+	flagDebugOn := getopt.BoolLong("debug", 'd', "log debugging information")
+	flagConfigFile := getopt.StringLong("config", 'c', "", "full path to config file", "config.toml")
+	flagHelpOn := getopt.BoolLong("help", 'h', "display help output")
+	flagVersionOn := getopt.BoolLong("version", 'v', "display version number")
+	getopt.Parse()
 
-	// elapsed := time.Since(start)
+	if *flagHelpOn {
+		getopt.PrintUsage(os.Stdout)
+		os.Exit(1)
+	}
 
-	// log.Printf("Execution took %s", elapsed)
+	if *flagVersionOn {
+		fmt.Printf("%s %s\n", programName, programVersion)
+		os.Exit(0)
+	}
 
-	http.HandleFunc("/render", handleGenerate)
+	viper.AutomaticEnv()
+	viper.SetEnvPrefix("tsm")
 
-	http.ListenAndServe(":8080", nil)
+	// Commandline over-rides config file for debugging
+	if *flagDebugOn {
+		viper.Set("Debug", true)
+		log.SetLevel(log.TraceLevel)
+	}
 
+	if *flagConfigFile != "" {
+		viper.SetConfigFile(*flagConfigFile)
+	} else {
+		viper.SetConfigName(programName)
+		viper.SetConfigType("toml")
+		viper.AddConfigPath("./config")
+		viper.AddConfigPath("/config")
+	}
+
+	// Report our status
+	log.Infof("%s %s", programName, programVersion)
+	log.Info("Run with --help parameter for commandline options")
+
+	// Read environment configuration first
+	if mbglURL := os.Getenv("MBGL_URL"); mbglURL != "" {
+		viper.Set("MbglUrl", mbglURL)
+		log.Info("Using mbgl render url from environment variable MBGL_URL")
+	}
+
+	if err := viper.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			log.Debugf("viper.ConfigFileNotFoundError: %s", err)
+		} else {
+			if _, ok := err.(viper.UnsupportedConfigError); ok {
+				log.Debugf("viper.UnsupportedConfigError: %s", err)
+			} else {
+				log.Fatalf("Configuration file error: %s", err)
+			}
+		}
+	} else {
+		if cf := viper.ConfigFileUsed(); cf != "" {
+			log.Infof("Using config file: %s", cf)
+		} else {
+			log.Info("Config file: none found, using defaults")
+		}
+	}
+
+	basePath := viper.GetString("BasePath")
+	log.Infof("Serving HTTP  at %s/", formatBaseURL(fmt.Sprintf("http://%s:%d",
+		viper.GetString("HttpHost"), viper.GetInt("HttpPort")), basePath))
+
+	// Get to work
+	handleRequests()
 }
+
+/******************************************************************************/
+func requestRenderMapsGrid(w http.ResponseWriter, r *http.Request) error {
+	log.WithFields(log.Fields{
+		"event": "request",
+		"topic": "rendermapsgrid",
+	}).Trace("requestRenderMapsGrid")
+
+	dc, err := generateMapsGrid(w, r)
+	if err != nil {
+		return err
+	}
+
+	buffer := new(bytes.Buffer)
+
+	dc.EncodePNG(buffer)
+
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Content-Length", strconv.Itoa(len(buffer.Bytes())))
+	w.Write(buffer.Bytes())
+
+	return nil
+}
+
+/******************************************************************************/
+
+// tsAppError is an optional error structure functions can return
+// if they want to specify the particular HTTP error code to be used
+// in their error return
+type tsAppError struct {
+	HTTPCode int
+	SrcErr   error
+	Topic    string
+	Message  string
+}
+
+// Error prints out a reasonable string format
+func (tsae tsAppError) Error() string {
+	if tsae.Message != "" {
+		return fmt.Sprintf("%s\n%s", tsae.Message, tsae.SrcErr.Error())
+	}
+	return tsae.SrcErr.Error()
+}
+
+// tsMapsHandler is a function handler that can replace the
+// existing handler and provide richer error handling, see below and
+// https://blog.golang.org/error-handling-and-go
+type tsMapsHandler func(w http.ResponseWriter, r *http.Request) error
+
+// ServeHTTP logs as much useful information as possible in
+// a field format for potential Json logging streams
+// as well as returning HTTP error response codes on failure
+// so clients can see what is going on
+func (fn tsMapsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log.WithFields(log.Fields{
+		"method": r.Method,
+		"url":    r.URL,
+	}).Infof("%s %s", r.Method, r.URL)
+
+	if err := fn(w, r); err != nil {
+		if hdr, ok := r.Header["x-correlation-id"]; ok {
+			log.WithField("correlation-id", hdr[0])
+		}
+		if e, ok := err.(tsAppError); ok {
+			if e.HTTPCode == 0 {
+				e.HTTPCode = 500
+			}
+			if e.Topic != "" {
+				log.WithField("topic", e.Topic)
+			}
+			log.WithField("key", e.Message)
+			log.WithField("src", e.SrcErr.Error())
+			log.Error(err)
+			http.Error(w, e.Error(), e.HTTPCode)
+		} else {
+			log.Error(err)
+			http.Error(w, err.Error(), 500)
+		}
+	}
+}
+
+/******************************************************************************/
+
+func tsMapsRouter() *mux.Router {
+	// creates a new instance of a mux router
+	r := mux.NewRouter().
+		StrictSlash(true).
+		PathPrefix(
+			"/" +
+				strings.TrimLeft(viper.GetString("BasePath"), "/"),
+		).
+		Subrouter()
+	// rendering page
+	r.Handle("/", tsMapsHandler(requestRenderMapsGrid)).Methods("POST")
+
+	if viper.GetBool("EnableMetrics") {
+		r.Handle("/metrics", promhttp.Handler())
+	}
+	return r
+}
+
+func handleRequests() {
+	// Get a configured router
+	r := tsMapsRouter()
+
+	// Allow CORS from anywhere
+	corsOrigins := viper.GetStringSlice("CORSOrigins")
+	corsOpt := handlers.AllowedOrigins(corsOrigins)
+
+	// Set a writeTimeout for the http server.
+	// This value is the application's DbTimeout config setting plus a
+	// grace period. The additional time allows the application to gracefully
+	// handle timeouts on its own, canceling outstanding database queries and
+	// returning an error to the client, while keeping the http.Server
+	// WriteTimeout as a fallback.
+	writeTimeout := (time.Duration(viper.GetInt("Timeout") + 5)) * time.Second
+
+	// more "production friendly" timeouts
+	// https://blog.simon-frey.eu/go-as-in-golang-standard-net-http-config-will-break-your-production/#You_should_at_least_do_this_The_easy_path
+	s := &http.Server{
+		ReadTimeout:  1 * time.Second,
+		WriteTimeout: writeTimeout,
+		Addr:         fmt.Sprintf("%s:%d", viper.GetString("HttpHost"), viper.GetInt("HttpPort")),
+		Handler:      handlers.CompressHandler(handlers.CORS(corsOpt)(r)),
+	}
+
+	// start http service
+	go func() {
+		// ListenAndServe returns http.ErrServerClosed when the server receives
+		// a call to Shutdown(). Other errors are unexpected.
+		if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal(err)
+		}
+	}()
+
+	// wait here for interrupt signal
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt)
+	<-sig
+
+	// Interrupt signal received:  Start shutting down
+	log.Infoln("Shutting down...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+	defer cancel()
+	s.Shutdown(ctx)
+
+	log.Infoln("Server stopped.")
+}
+
+/******************************************************************************/
