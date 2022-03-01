@@ -1,3 +1,4 @@
+[Server]
 # Accept connections on this subnet (default accepts on all)
 HttpHost = "0.0.0.0"
 
@@ -8,6 +9,16 @@ HttpPort = 5800
 # If set, all routes will be prefixed with this path
 BasePath = "/"
 
+# Cancel a maps request if a map can't be rendered in this time (seconds)
+Timeout = 30
+
+# To specify domain(s) that should be CORS-allowed, express them as ["https://mydomain.com", "https://anotherdomain.org"]
+CORSOrigins = ["*"]
+
+# Output extra logging information?
+# Debug = false
+
+[MapsGrid]
 # Url for mbgl renderer. Make sure it accepts POST requests
 MbglUrl = "https://eahazardswatch.icpac.net/mbgl-renderer/render"
 
@@ -21,18 +32,3 @@ TextHeight = 40
 LeftLabelsWidth = 70
 RightPadding = 20
 ImagePadding = 1
-
-# Cancel a maps request if a map can't be rendered in this time (seconds)
-Timeout = 30
-
-# Enable Prometheus metrics
-# Metrics will be exported at `/metrics`.
-EnableMetrics = true
-
-# Allow any page to consume these tiles (default)
-# To specify domain(s) that should be CORS-allowed, express them as ["https://mydomain.com", "https://anotherdomain.org"]
-CORSOrigins = ["*"]
-
-
-# Output extra logging information?
-# Debug = false
