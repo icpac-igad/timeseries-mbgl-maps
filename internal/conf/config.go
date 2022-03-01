@@ -2,6 +2,7 @@ package conf
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
@@ -112,6 +113,11 @@ func InitConfig(configFilename string) {
 
 	log.Infof("Using config file: %s", viper.ConfigFileUsed())
 	viper.Unmarshal(&Configuration)
+
+	// override mbglurl with url  from env
+	if mbglUrl := os.Getenv("MBGL_URL"); mbglUrl != "" {
+		Configuration.MapsGrid.MbglUrl = mbglUrl
+	}
 
 	// sanitize the configuration
 	Configuration.Server.BasePath = strings.TrimRight(Configuration.Server.BasePath, "/")
