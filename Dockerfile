@@ -26,7 +26,7 @@ COPY --from=0 /app/fonts /app/fonts
 VOLUME ["/config"]
 
 USER 1001
-EXPOSE 7800
+EXPOSE 9000
 
 ENTRYPOINT ["/app/timeseries-mbgl-maps"]
 CMD []
